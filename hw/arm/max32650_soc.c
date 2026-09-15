@@ -53,7 +53,7 @@ static void max32650_soc_initfn(Object *obj)
 
     for (i = 0; i < MAX32650_NUM_UART; i++) {
         g_autofree char *name = g_strdup_printf("uart%d", i);
-        object_initialize_child(obj, name, &s->uart[i], TYPE_MAX78000_UART);
+        object_initialize_child(obj, name, &s->uart[i], TYPE_MAX32650_UART);
     }
 
     object_initialize_child(obj, "trng", &s->trng, TYPE_MAX78000_TRNG);
@@ -100,6 +100,15 @@ static void max32650_soc_realize(DeviceState *dev_soc, Error **errp)
         error_propagate(errp, err);
         return;
     }
+
+    memory_region_init_ram(&s->info_mem, NULL, "MAX32650.info_mem",
+                           MAX32650_INFO_MEM_SIZE, &err);
+    if (err != NULL) {
+        error_propagate(errp, err);
+        return;
+    }
+    memory_region_add_subregion(system_memory, MAX32650_INFO_MEM_BASE_ADDRESS,
+                                &s->info_mem);
 
     gcrdev = DEVICE(&s->gcr);
     object_property_set_link(OBJECT(gcrdev), "sram", OBJECT(&s->sram), &err);

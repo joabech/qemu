@@ -22,30 +22,38 @@ static void max32650_spi_update_irq(Max32650SpiState *s)
 }
 
 /*
- * Drain everything currently queued in the TX FIFO across the SSI bus,
- * pushing each returned byte into the RX FIFO, and flag the transfer as
- * complete. Real hardware shifts bytes out continuously once CTRL0.START
+ * Drain what's queued in the TX FIFO across the SSI bus, pushing each
+ * returned byte into the RX FIFO, stopping if the RX FIFO fills up before
+ * TX empties. Real hardware shifts bytes out continuously once CTRL0.START
  * is asserted, refilling the TX FIFO and draining the RX FIFO as software
- * services it; this immediate/synchronous model collapses that into a
- * single drain so it can be called both when START is first asserted
- * (draining whatever was queued before the transfer started) and again
- * from the FIFO write path while the engine is still running (draining
- * bytes queued after START, for transfers larger than the FIFO).
+ * services it, and stalls the shift engine (no more bytes go out) once RX
+ * has no room left rather than ever discarding a received byte -- so this
+ * immediate/synchronous model must stop short at a full RX FIFO too,
+ * leaving the rest queued in TX for a later call to pick up, instead of
+ * dropping bytes there's no room for. (An earlier version dropped them,
+ * which is invisible for any transfer that fits in one FIFO's worth, but
+ * permanently -- and silently -- loses bytes on any full-duplex transfer
+ * bigger than the FIFO, such as ADIN1110 frame reads/writes: the master's
+ * byte-accounting then never reaches its expected total and its transfer
+ * polling loop spins forever.)
+ *
+ * Called both when START is first asserted (draining whatever was queued
+ * before the transfer started) and again from the FIFO write/read paths
+ * while the engine is still running, so a transfer larger than the FIFO
+ * makes progress as software refills TX and drains RX.
  */
 static void max32650_spi_flush_tx(Max32650SpiState *s)
 {
-    while (!fifo8_is_empty(&s->tx_fifo)) {
+    while (!fifo8_is_empty(&s->tx_fifo) && !fifo8_is_full(&s->rx_fifo)) {
         uint8_t tx = fifo8_pop(&s->tx_fifo);
         uint8_t rx = ssi_transfer(s->bus, tx);
 
-        if (fifo8_is_full(&s->rx_fifo)) {
-            s->intfl |= SPI_INT_RX_OV;
-        } else {
-            fifo8_push(&s->rx_fifo, rx);
-        }
+        fifo8_push(&s->rx_fifo, rx);
     }
 
-    s->intfl |= SPI_INT_MST_DONE;
+    if (fifo8_is_empty(&s->tx_fifo)) {
+        s->intfl |= SPI_INT_MST_DONE;
+    }
 }
 
 static void max32650_spi_reset_hold(Object *obj, ResetType type)
@@ -65,6 +73,10 @@ static void max32650_spi_reset_hold(Object *obj, ResetType type)
 
     fifo8_reset(&s->tx_fifo);
     fifo8_reset(&s->rx_fifo);
+
+    /* Deasserted (this device's SS lines are active-low, per real hardware
+     * and the no-OS platform driver's SPI_SS_POL_LOW default). */
+    qemu_set_irq(s->cs, 1);
 }
 
 static uint64_t max32650_spi_read(void *opaque, hwaddr addr,
@@ -77,6 +89,14 @@ static uint64_t max32650_spi_read(void *opaque, hwaddr addr,
     case SPI_FIFO:
         if (!fifo8_is_empty(&s->rx_fifo)) {
             retvalue = fifo8_pop(&s->rx_fifo);
+        }
+        /*
+         * Popping may have freed the room that stalled max32650_spi_flush_tx()
+         * (see its comment) -- resume shifting out whatever's still queued
+         * in TX now that there's space for the responses again.
+         */
+        if ((s->ctrl0 & SPI_CTRL0_EN) && (s->ctrl0 & SPI_CTRL0_START)) {
+            max32650_spi_flush_tx(s);
         }
         break;
     case SPI_CTRL0:
@@ -156,13 +176,36 @@ static void max32650_spi_write(void *opaque, hwaddr addr,
         }
         max32650_spi_update_irq(s);
         return;
-    case SPI_CTRL0:
+    case SPI_CTRL0: {
+        uint32_t old = s->ctrl0;
+
+        /*
+         * The real MAX32650 SPI driver (no-OS max32650/maxim_spi.c) asserts
+         * SS by setting START (with SS_CTRL cleared, i.e. cs_change mode --
+         * the only mode this workspace's SPI users configure) and
+         * deasserts it by clearing START once the transaction's declared
+         * byte count has been shifted -- so mirroring START's edges onto
+         * the cs line reproduces real per-transaction chip-select framing
+         * without needing to separately track CTRL1's byte count here.
+         */
+        if (!(old & SPI_CTRL0_START) && (value & SPI_CTRL0_START)) {
+            qemu_set_irq(s->cs, 0);
+            s->intfl |= SPI_INT_SSA;
+        }
+
         s->ctrl0 = value;
         if ((value & SPI_CTRL0_EN) && (value & SPI_CTRL0_START)) {
             max32650_spi_flush_tx(s);
         }
+
+        if ((old & SPI_CTRL0_START) && !(value & SPI_CTRL0_START)) {
+            qemu_set_irq(s->cs, 1);
+            s->intfl |= SPI_INT_SSD;
+        }
+
         max32650_spi_update_irq(s);
         return;
+    }
     case SPI_CTRL1:
         s->ctrl1 = value;
         return;
@@ -258,6 +301,7 @@ static void max32650_spi_init(Object *obj)
     fifo8_create(&s->rx_fifo, MAX32650_SPI_FIFO_DEPTH);
 
     sysbus_init_irq(SYS_BUS_DEVICE(obj), &s->irq);
+    qdev_init_gpio_out_named(DEVICE(obj), &s->cs, "cs", 1);
 
     memory_region_init_io(&s->mmio, obj, &max32650_spi_ops, s,
                           TYPE_MAX32650_SPI, 0x2000);

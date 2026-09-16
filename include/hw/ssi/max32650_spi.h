@@ -127,6 +127,7 @@ struct Max32650SpiState {
     Fifo8 rx_fifo;
 
     qemu_irq irq;
+    qemu_irq cs;
     SSIBus *bus;
 };
 

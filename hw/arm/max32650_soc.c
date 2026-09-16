@@ -19,6 +19,7 @@
 #include "hw/arm/max32650_soc.h"
 #include "hw/qdev-clock.h"
 #include "hw/misc/unimp.h"
+#include "hw/net/adin1110.h"
 
 #define MAX32650_ICC0_ADDR 0x4002a000
 
@@ -187,6 +188,24 @@ static void max32650_soc_realize(DeviceState *dev_soc, Error **errp)
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, max32650_spi_addr[i]);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
                            qdev_get_gpio_in(armv7m, max32650_spi_irq[i]));
+    }
+
+    /*
+     * The adin1110 project (NO_OS_BOARD=max32650fthr) wires its ADIN1110
+     * MAC-PHY to SPI1 chip-select 0 (SPI_DEVICE_ID=1, SPI_CS=0 in
+     * no-OS/projects/adin1110/src/platform/maxim/parameters.h) and its
+     * reset pin to GPIO0.19 (RST_GPIO_PORT/NUM in the same file).
+     */
+    {
+        DeviceState *adin1110dev;
+
+        adin1110dev = DEVICE(ssi_create_peripheral(max32650_spi_get_bus(&s->spi[1]),
+                                                    TYPE_ADIN1110));
+        qdev_connect_gpio_out_named(DEVICE(&s->spi[1]), "cs", 0,
+                                    qdev_get_gpio_in_named(adin1110dev,
+                                                           SSI_GPIO_CS, 0));
+        qdev_connect_gpio_out(DEVICE(&s->gpio[0]), 19,
+                              qdev_get_gpio_in_named(adin1110dev, "reset", 0));
     }
 
     /*

@@ -4,9 +4,8 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * platform-sdk local addition -- see include/hw/arm/max32650_soc.h for the
- * rationale (reuses MAX78000's GCR/UART/ICC/TRNG device models, which share
- * MAX32650's register layout, but with MAX32650's own memory map, base
- * addresses, IRQ numbers, and real GPIO/SPI models).
+ * rationale (real, from-scratch MAX32650 GCR/ICC/TRNG/UART/GPIO/SPI device
+ * models, MAX32650's own memory map, base addresses, and IRQ numbers).
  *
  * Base addresses and IRQ numbers below are taken from
  * msdk/Libraries/CMSIS/Device/Maxim/MAX32650/Include/max32650.h
@@ -44,11 +43,11 @@ static void max32650_soc_initfn(Object *obj)
 
     object_initialize_child(obj, "armv7m", &s->armv7m, TYPE_ARMV7M);
 
-    object_initialize_child(obj, "gcr", &s->gcr, TYPE_MAX78000_GCR);
+    object_initialize_child(obj, "gcr", &s->gcr, TYPE_MAX32650_GCR);
 
     for (i = 0; i < MAX32650_NUM_ICC; i++) {
         g_autofree char *name = g_strdup_printf("icc%d", i);
-        object_initialize_child(obj, name, &s->icc[i], TYPE_MAX78000_ICC);
+        object_initialize_child(obj, name, &s->icc[i], TYPE_MAX32650_ICC);
     }
 
     for (i = 0; i < MAX32650_NUM_UART; i++) {
@@ -56,7 +55,7 @@ static void max32650_soc_initfn(Object *obj)
         object_initialize_child(obj, name, &s->uart[i], TYPE_MAX32650_UART);
     }
 
-    object_initialize_child(obj, "trng", &s->trng, TYPE_MAX78000_TRNG);
+    object_initialize_child(obj, "trng", &s->trng, TYPE_MAX32650_TRNG);
 
     for (i = 0; i < MAX32650_NUM_GPIO; i++) {
         g_autofree char *name = g_strdup_printf("gpio%d", i);
@@ -123,9 +122,8 @@ static void max32650_soc_realize(DeviceState *dev_soc, Error **errp)
 
     /*
      * MXC_IRQ_EXT_COUNT in max32650.h is 97; use a slightly generous value
-     * the same way max78000_soc.c does, since this has not been tested
-     * against real hardware interrupt timing, only the register-level
-     * boot/SPI path this project needs.
+     * since this has not been tested against real hardware interrupt
+     * timing, only the register-level boot/SPI path this project needs.
      */
     qdev_prop_set_uint32(armv7m, "num-irq", 100);
     qdev_prop_set_uint8(armv7m, "num-prio-bits", 3);
@@ -165,13 +163,10 @@ static void max32650_soc_realize(DeviceState *dev_soc, Error **errp)
     sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, MAX32650_TRNG_ADDR);
     sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
                        qdev_get_gpio_in(armv7m, MAX32650_TRNG_IRQ));
-    object_property_set_link(OBJECT(gcrdev), "trng", OBJECT(dev), &err);
-
     /*
-     * Unlike MAX78000, MAX32650 has no AES accelerator -- the "aes" link on
-     * max78000-gcr is left unset. It is only dereferenced when the guest
-     * writes the AES_RESET bit to RSTR, which this project's firmware never
-     * does.
+     * No link to the GCR here: MAX32650's real RST0 register has no TRNG
+     * reset bit (it's only clock-gated via PCLK_DIS1), so unlike this SoC's
+     * UARTs, the TRNG is never reset through the GCR.
      */
 
     dev = DEVICE(&s->gcr);

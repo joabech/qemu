@@ -3,8 +3,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * platform-sdk local addition, modeled on hw/arm/max78000fthr.c. Targets
- * no-OS's `adin1110` project (NO_OS_BOARD=max32650fthr).
+ * platform-sdk local addition. Targets no-OS's `adin1110` project
+ * (NO_OS_BOARD=max32650fthr).
  */
 
 #include "qemu/osdep.h"

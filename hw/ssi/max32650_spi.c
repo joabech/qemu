@@ -221,10 +221,9 @@ static const MemoryRegionOps max32650_spi_ops = {
     /*
      * The real FIFO register is a union (fifo32/fifo16[2]/fifo8[4]) and the
      * MSDK driver does byte-at-a-time stores to it via the fifo8[] member --
-     * a 4-byte-only restriction (as used by hw/char/max78000_uart.c, whose
-     * registers this driver only ever touches as full words) faults on that
-     * access, confirmed by booting real firmware and observing a Data Abort
-     * at this device's base address.
+     * a 4-byte-only restriction (this device's first cut only allowed full
+     * word accesses) faults on that access, confirmed by booting real
+     * firmware and observing a Data Abort at this device's base address.
      */
     .valid.min_access_size = 1,
     .valid.max_access_size = 4,

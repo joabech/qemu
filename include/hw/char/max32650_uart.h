@@ -5,12 +5,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * MAX32650's UART_REVA register layout (msdk
- * Libraries/PeriphDrivers/Source/UART/uart_reva_regs.h) does NOT match
- * hw/char/max78000_uart.c's offsets past the first two registers -- notably
- * the real FIFO data register is at 0x1c, not 0x20 -- so that model cannot
- * be reused verbatim here despite the two chips sharing the same UART base
- * addresses. This is a real, distinct device.
+ * Register offsets below are UART_REVA's real layout, taken from msdk
+ * Libraries/PeriphDrivers/Source/UART/uart_reva_regs.h -- notably the real
+ * FIFO data register is at 0x1c.
  */
 
 #ifndef HW_CHAR_MAX32650_UART_H

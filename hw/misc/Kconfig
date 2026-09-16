@@ -59,6 +59,15 @@ config MAX78000_ICC
 config MAX78000_TRNG
     bool
 
+config MAX32650_GCR
+    bool
+
+config MAX32650_ICC
+    bool
+
+config MAX32650_TRNG
+    bool
+
 config MOS6522
     bool
 

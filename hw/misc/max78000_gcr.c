@@ -259,19 +259,12 @@ static void max78000_gcr_write(void *opaque, hwaddr addr,
 static const Property max78000_gcr_properties[] = {
     DEFINE_PROP_LINK("sram", Max78000GcrState, sram,
                      TYPE_MEMORY_REGION, MemoryRegion*),
-    /*
-     * platform-sdk local change: relaxed from TYPE_MAX78000_UART to the
-     * generic TYPE_DEVICE so max32650_soc.c can link its own
-     * TYPE_MAX32650_UART instances here too -- this code only ever calls
-     * device_cold_reset() on these, which takes a plain DeviceState*, so
-     * the original type constraint was tighter than necessary.
-     */
     DEFINE_PROP_LINK("uart0", Max78000GcrState, uart0,
-                     TYPE_DEVICE, DeviceState*),
+                     TYPE_MAX78000_UART, DeviceState*),
     DEFINE_PROP_LINK("uart1", Max78000GcrState, uart1,
-                     TYPE_DEVICE, DeviceState*),
+                     TYPE_MAX78000_UART, DeviceState*),
     DEFINE_PROP_LINK("uart2", Max78000GcrState, uart2,
-                     TYPE_DEVICE, DeviceState*),
+                     TYPE_MAX78000_UART, DeviceState*),
     DEFINE_PROP_LINK("trng", Max78000GcrState, trng,
                         TYPE_MAX78000_TRNG, DeviceState*),
     DEFINE_PROP_LINK("aes", Max78000GcrState, aes,

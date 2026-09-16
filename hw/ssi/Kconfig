@@ -25,6 +25,10 @@ config MAX32650_SPI
     bool
     select SSI
 
+config SSI_LOOPBACK
+    bool
+    select SSI
+
 config BCM2835_SPI
     bool
     select SSI

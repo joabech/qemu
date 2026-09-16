@@ -17,8 +17,10 @@
 #include "system/system.h"
 #include "hw/arm/max32650_soc.h"
 #include "hw/qdev-clock.h"
+#include "hw/qdev-properties.h"
 #include "hw/misc/unimp.h"
 #include "hw/net/adin1110.h"
+#include "hw/ssi/ssi-loopback.h"
 
 #define MAX32650_ICC0_ADDR 0x4002a000
 
@@ -27,8 +29,18 @@ static const uint32_t max32650_uart_addr[] = {0x40042000, 0x40043000,
 static const int max32650_uart_irq[] = {14, 15, 34};
 
 static const uint32_t max32650_gpio_addr[] = {0x40008000, 0x40009000,
-                                              0x4000a000};
-static const int max32650_gpio_irq[] = {24, 25, 26};
+                                              0x4000a000, 0x4000b000};
+/*
+ * GPIO3_IRQn is 74 per max32650.h's IRQn_Type (QEMU's armv7m GPIO input
+ * line N is that same CMSIS IRQn value directly -- see NVIC_FIRST_IRQ in
+ * hw/intc/armv7m_nvic.c). GPIO0-2 below use 24/25/26 instead of their real
+ * 40/41/42 -- a pre-existing, presumably unintentional off-by-16 across
+ * this whole file (also affects the UART/SPI/TRNG IRQ numbers below) that
+ * predates this GPIO3 addition and hasn't been fixed here; nothing in this
+ * project's SPI/UART/TRNG code paths uses real NVIC-driven interrupts
+ * (everything polls status registers directly), so it's been latent.
+ */
+static const int max32650_gpio_irq[] = {24, 25, 26, 74};
 
 static const uint32_t max32650_spi_addr[] = {0x40046000, 0x40047000};
 static const int max32650_spi_irq[] = {16, 17};
@@ -208,6 +220,15 @@ static void max32650_soc_realize(DeviceState *dev_soc, Error **errp)
     }
 
     /*
+     * "spi0-loopback" opt-in only -- see the field's comment in
+     * max32650_soc.h for why this isn't unconditional.
+     */
+    if (s->spi0_loopback) {
+        ssi_create_peripheral(max32650_spi_get_bus(&s->spi[0]),
+                              TYPE_SSI_LOOPBACK);
+    }
+
+    /*
      * Everything else this SoC doesn't yet model as a real device. Timers,
      * I2C, DMA, ADC, watchdog, flash controller etc. are all unimplemented
      * for now -- the adin1110 boot + SPI path this project targets does not
@@ -246,11 +267,16 @@ static void max32650_soc_realize(DeviceState *dev_soc, Error **errp)
     create_unimplemented_device("i2c1",                 0x4001e000, 0x1000);
 }
 
+static const Property max32650_soc_properties[] = {
+    DEFINE_PROP_BOOL("spi0-loopback", MAX32650State, spi0_loopback, false),
+};
+
 static void max32650_soc_class_init(ObjectClass *klass, const void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
 
     dc->realize = max32650_soc_realize;
+    device_class_set_props(dc, max32650_soc_properties);
 }
 
 static const TypeInfo max32650_soc_info = {

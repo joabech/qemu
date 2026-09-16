@@ -53,7 +53,7 @@ OBJECT_DECLARE_SIMPLE_TYPE(MAX32650State, MAX32650_SOC)
 /* Only icc0 exists on MAX32650 (single Cortex-M4F core, no second cache) */
 #define MAX32650_NUM_ICC 1
 #define MAX32650_NUM_UART 3
-#define MAX32650_NUM_GPIO 3
+#define MAX32650_NUM_GPIO 4
 #define MAX32650_NUM_SPI 2
 
 struct MAX32650State {
@@ -73,6 +73,15 @@ struct MAX32650State {
     Max32650SpiState spi[MAX32650_NUM_SPI];
 
     Clock *sysclk;
+
+    /*
+     * SPI0 has no fixed peripheral on the real max32650fthr board (unlike
+     * SPI1, permanently wired to the ADIN1110 below) -- this stands in for
+     * physically shorting its MISO/MOSI pins together, for firmware that
+     * assumes exactly that (e.g. msdk's own SPI example). Off by default so
+     * it never intercepts traffic a future real SPI0 peripheral would get.
+     */
+    bool spi0_loopback;
 };
 
 #endif

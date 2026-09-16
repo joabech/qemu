@@ -387,6 +387,7 @@ config MAX32650_SOC
     select MAX32650_GPIO
     select MAX32650_SPI
     select ADIN1110
+    select SSI_LOOPBACK
 
 config RASPI
     bool

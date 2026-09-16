@@ -263,8 +263,8 @@ static const MemoryRegionOps max32650_spi_ops = {
     .endianness = DEVICE_LITTLE_ENDIAN,
     /*
      * The real FIFO register is a union (fifo32/fifo16[2]/fifo8[4]) and the
-     * MSDK driver does byte-at-a-time stores to it via the fifo8[] member --
-     * a 4-byte-only restriction (this device's first cut only allowed full
+     * driver does byte-at-a-time stores to it via the fifo8[] member -- a
+     * 4-byte-only restriction (this device's first cut only allowed full
      * word accesses) faults on that access, confirmed by booting real
      * firmware and observing a Data Abort at this device's base address.
      */

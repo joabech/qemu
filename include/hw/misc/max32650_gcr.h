@@ -6,8 +6,8 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * Register offsets and RST0 bit positions below are taken directly from
- * msdk/Libraries/CMSIS/Device/Maxim/MAX32650/Include/gcr_regs.h
- * (mxc_gcr_regs_t / MXC_F_GCR_*). Notably, MAX32650's GCR has no ECC/GPR
+ * this part's own CMSIS gcr_regs.h (mxc_gcr_regs_t / MXC_F_GCR_*).
+ * Notably, MAX32650's GCR has no ECC/GPR
  * registers and its RST0 has no TRNG bit at all (TRNG is only clock-gated
  * via PCLK_DIS1 on this part, never reset through GCR) -- this model omits
  * both rather than carrying over unrelated bits from another part's GCR.

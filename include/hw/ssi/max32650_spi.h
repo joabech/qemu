@@ -97,10 +97,9 @@
 /* STAT */
 #define SPI_STAT_BUSY (1 << 0)
 
-/* Matches the real MAX32650 SPI hardware FIFO depth (MXC_SPI_FIFO_DEPTH in
- * the MSDK), so the TX_LVL/RX_LVL bookkeeping above lines up with what the
- * real driver's byte-count math (compiled against that same constant)
- * expects.
+/* Matches the real MAX32650 SPI hardware FIFO depth (MXC_SPI_FIFO_DEPTH), so
+ * the TX_LVL/RX_LVL bookkeeping above lines up with what the real driver's
+ * byte-count math (compiled against that same constant) expects.
  */
 #define MAX32650_SPI_FIFO_DEPTH 32
 

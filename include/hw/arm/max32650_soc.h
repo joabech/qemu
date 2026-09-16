@@ -4,20 +4,18 @@
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
  * platform-sdk local addition. Register offsets and base addresses below
- * are taken directly from this part's own CMSIS headers under
- * msdk/Libraries/CMSIS/Device/Maxim/MAX32650/Include/ (max32650.h,
- * gcr_regs.h) and the MSDK PeriphDrivers "_RevA" register headers under
- * msdk/Libraries/PeriphDrivers/Source/{UART,SPI,GPIO,TRNG}/ -- every device
- * model here (GCR, ICC, TRNG, UART, GPIO, SPI) is a from-scratch MAX32650
- * model checked against those headers and against real firmware boot
- * behavior, not adapted from another part.
+ * are taken directly from this part's own CMSIS headers and the "_RevA"
+ * PeriphDriver register headers for the MAX32650 -- every device model
+ * here (GCR, ICC, TRNG, UART, GPIO, SPI) is a from-scratch MAX32650 model
+ * checked against those headers and against real firmware boot behavior,
+ * not adapted from another part.
  *
  * MAX32650 has no AES peripheral at all (it only has AESKEYS key storage at
  * an unrelated address nothing in this project touches), so this SoC does
  * not instantiate an AES device.
  *
- * Memory map: 3MB flash @0x10000000, 1MB SRAM @0x20000000, per
- * msdk/Libraries/CMSIS/Device/Maxim/MAX32650/Source/GCC/max32650.ld.
+ * Memory map: 3MB flash @0x10000000, 1MB SRAM @0x20000000, per the
+ * MAX32650's linker script.
  */
 
 #ifndef HW_ARM_MAX32650_SOC_H
@@ -44,9 +42,9 @@ OBJECT_DECLARE_SIMPLE_TYPE(MAX32650State, MAX32650_SOC)
 /*
  * MXC_INFO_MEM_BASE/_SIZE from max32650.h -- a separate 16KB flash "info"
  * block (factory trim/calibration/user data), distinct from main flash.
- * MSDK's flash-controller init/self-test code touches this directly, so it
- * must be mapped even though this project has no real trim data to serve --
- * backed by plain RAM (read-back-what-you-write) rather than left
+ * The part's flash-controller init/self-test code touches this directly, so
+ * it must be mapped even though this project has no real trim data to serve
+ * -- backed by plain RAM (read-back-what-you-write) rather than left
  * unimplemented, which faulted with a Data Abort during boot.
  */
 #define MAX32650_INFO_MEM_BASE_ADDRESS 0x10800000

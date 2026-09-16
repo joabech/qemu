@@ -7,9 +7,8 @@
  * rationale (real, from-scratch MAX32650 GCR/ICC/TRNG/UART/GPIO/SPI device
  * models, MAX32650's own memory map, base addresses, and IRQ numbers).
  *
- * Base addresses and IRQ numbers below are taken from
- * msdk/Libraries/CMSIS/Device/Maxim/MAX32650/Include/max32650.h
- * (MXC_BASE_* and the IRQn_Type enum).
+ * Base addresses and IRQ numbers below are taken from this part's own
+ * CMSIS header (MXC_BASE_* and the IRQn_Type enum).
  */
 
 #include "qemu/osdep.h"

@@ -5,9 +5,8 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * Register layout is TRNG_REVA (msdk
- * Libraries/PeriphDrivers/Source/TRNG/trng_reva_regs.h, used by
- * MAX32650): just CTRL at 0x00 and a read-only DATA at 0x04, no separate
+ * Register layout is TRNG_REVA (used by MAX32650): just CTRL at 0x00 and a
+ * read-only DATA at 0x04, no separate
  * STATUS register -- data-ready is bit RNG_IS within CTRL itself, modeled
  * here as always set since a random value is always available. This
  * project's firmware never touches these registers (it only gates the

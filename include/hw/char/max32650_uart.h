@@ -5,9 +5,9 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  *
- * Register offsets below are UART_REVA's real layout, taken from msdk
- * Libraries/PeriphDrivers/Source/UART/uart_reva_regs.h -- notably the real
- * FIFO data register is at 0x1c.
+ * Register offsets below are UART_REVA's real layout, taken from the
+ * part's own PeriphDriver register headers -- notably the real FIFO data
+ * register is at 0x1c.
  */
 
 #ifndef HW_CHAR_MAX32650_UART_H

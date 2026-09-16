@@ -17,7 +17,7 @@
 #include "hw/arm/max32650_soc.h"
 #include "hw/arm/boot.h"
 
-/* 96MHz is MAX32650's default IPO clock; matches msdk's SystemInit(). */
+/* 96MHz is MAX32650's default IPO clock out of reset. */
 #define SYSCLK_FRQ 96000000ULL
 
 static void max32650_init(MachineState *machine)

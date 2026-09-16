@@ -125,6 +125,28 @@ struct Max32650SpiState {
     Fifo8 tx_fifo;
     Fifo8 rx_fifo;
 
+    /*
+     * Which byte of a 2-byte (9-16 bit) character max32650_spi_flush_tx()
+     * is about to move next -- 0 for the low byte, 1 for the high byte.
+     * Reset wherever a fresh character stream starts (reset, a new START,
+     * or a FIFO flush), since NUMBITS 9-16 packs a character across two
+     * FIFO bytes and this model has no other way to track character
+     * boundaries across separate byte-at-a-time or wider FIFO accesses.
+     */
+    uint8_t char_byte_parity;
+
+    /*
+     * Whether a transaction is still in progress, and how many bytes of it
+     * have been shifted so far. Set/reset on CTRL0.START's rising edge (see
+     * max32650_spi_flush_tx()'s comment for why the bit's *current* level
+     * can't be used instead) and cleared once CTRL1's declared character
+     * count has been fully shifted -- mirroring how real hardware, once
+     * started, keeps running to completion on its own regardless of what
+     * software does to the START bit afterwards.
+     */
+    bool running;
+    uint32_t bytes_done;
+
     qemu_irq irq;
     qemu_irq cs;
     SSIBus *bus;

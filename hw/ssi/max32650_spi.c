@@ -22,6 +22,25 @@ static void max32650_spi_update_irq(Max32650SpiState *s)
 }
 
 /*
+ * How many bytes CTRL1 declares this transaction will move, accounting for
+ * NUMBITS 9-16 packing two FIFO bytes per character. 0 means neither
+ * TX_NUM_CHAR nor RX_NUM_CHAR was ever set (some drivers don't bother) --
+ * callers fall back to draining "whatever's queued" for that case.
+ */
+static uint32_t max32650_spi_total_bytes(Max32650SpiState *s)
+{
+    unsigned bits = (s->ctrl2 & SPI_CTRL2_NUMBITS) >> SPI_CTRL2_NUMBITS_POS;
+    unsigned effective_bits = bits ? bits : 16;
+    uint32_t tx_chars = (s->ctrl1 & SPI_CTRL1_TX_NUM_CHAR) >>
+                        SPI_CTRL1_TX_NUM_CHAR_POS;
+    uint32_t rx_chars = (s->ctrl1 & SPI_CTRL1_RX_NUM_CHAR) >>
+                        SPI_CTRL1_RX_NUM_CHAR_POS;
+    uint32_t chars = MAX(tx_chars, rx_chars);
+
+    return chars * (effective_bits > 8 ? 2 : 1);
+}
+
+/*
  * Drain what's queued in the TX FIFO across the SSI bus, pushing each
  * returned byte into the RX FIFO, stopping if the RX FIFO fills up before
  * TX empties. Real hardware shifts bytes out continuously once CTRL0.START
@@ -37,21 +56,64 @@ static void max32650_spi_update_irq(Max32650SpiState *s)
  * byte-accounting then never reaches its expected total and its transfer
  * polling loop spins forever.)
  *
- * Called both when START is first asserted (draining whatever was queued
- * before the transfer started) and again from the FIFO write/read paths
- * while the engine is still running, so a transfer larger than the FIFO
- * makes progress as software refills TX and drains RX.
+ * Only does anything while s->running -- see the field's comment in the
+ * header for why a transaction's "still in progress" state can't just be
+ * read off CTRL0.START's current level. Called from all three FIFO/CTRL0
+ * write and FIFO-read sites below unconditionally; it's a no-op otherwise.
  */
 static void max32650_spi_flush_tx(Max32650SpiState *s)
 {
-    while (!fifo8_is_empty(&s->tx_fifo) && !fifo8_is_full(&s->rx_fifo)) {
-        uint8_t tx = fifo8_pop(&s->tx_fifo);
-        uint8_t rx = ssi_transfer(s->bus, tx);
+    /*
+     * NUMBITS (CTRL2, 0 meaning 16 per real hardware's own convention) is
+     * the character width actually shifted onto the wire. Real hardware
+     * only ever latches that many real bits per character into the
+     * receive shift register -- the rest reads back as 0, not whatever
+     * the peripheral drove on those unused clock edges. Masking rx here
+     * (not e.g. at the FIFO-read side) matches where real hardware would
+     * do it: at the point data actually moves off the wire into the
+     * receive path.
+     *
+     * NUMBITS 9-16 packs one character across two FIFO bytes, low byte
+     * first (msdk's own driver uses the FIFO16/32 aliases for those --
+     * see spi_reva1.c's WriteTXFIFO/ReadRXFIFO): the low byte is always
+     * fully used, only the high byte's low (bits-8) bits are real.
+     * s->char_byte_parity tracks which half of the pair the next byte
+     * this loop moves is, since nothing else in this byte-at-a-time model
+     * knows where character boundaries fall.
+     */
+    unsigned bits = (s->ctrl2 & SPI_CTRL2_NUMBITS) >> SPI_CTRL2_NUMBITS_POS;
+    uint8_t low_mask = 0xff;
+    uint8_t high_mask = 0xff;
+    uint32_t total;
 
-        fifo8_push(&s->rx_fifo, rx);
+    if (!s->running) {
+        return;
     }
 
-    if (fifo8_is_empty(&s->tx_fifo)) {
+    if (bits > 0 && bits < 8) {
+        low_mask = high_mask = (uint8_t)((1u << bits) - 1);
+    } else if (bits > 8 && bits < 16) {
+        high_mask = (uint8_t)((1u << (bits - 8)) - 1);
+    }
+
+    total = max32650_spi_total_bytes(s);
+
+    while (!fifo8_is_empty(&s->tx_fifo) && !fifo8_is_full(&s->rx_fifo) &&
+           (total == 0 || s->bytes_done < total)) {
+        uint8_t tx = fifo8_pop(&s->tx_fifo);
+        uint8_t rx_mask = s->char_byte_parity ? high_mask : low_mask;
+        uint8_t rx = ssi_transfer(s->bus, tx) & rx_mask;
+
+        fifo8_push(&s->rx_fifo, rx);
+        s->bytes_done++;
+
+        if (bits > 8) {
+            s->char_byte_parity ^= 1;
+        }
+    }
+
+    if (total != 0 ? (s->bytes_done >= total) : fifo8_is_empty(&s->tx_fifo)) {
+        s->running = false;
         s->intfl |= SPI_INT_MST_DONE;
     }
 }
@@ -73,6 +135,9 @@ static void max32650_spi_reset_hold(Object *obj, ResetType type)
 
     fifo8_reset(&s->tx_fifo);
     fifo8_reset(&s->rx_fifo);
+    s->char_byte_parity = 0;
+    s->running = false;
+    s->bytes_done = 0;
 
     /* Deasserted (this device's SS lines are active-low, per real hardware
      * and the no-OS platform driver's SPI_SS_POL_LOW default). */
@@ -86,19 +151,34 @@ static uint64_t max32650_spi_read(void *opaque, hwaddr addr,
     uint64_t retvalue = 0;
 
     switch (addr) {
-    case SPI_FIFO:
-        if (!fifo8_is_empty(&s->rx_fifo)) {
-            retvalue = fifo8_pop(&s->rx_fifo);
+    case SPI_FIFO: {
+        /*
+         * Real hardware aliases fifo8[4]/fifo16[2]/fifo32 over the same
+         * bytes (msdk's own driver picks the access width matching NUMBITS
+         * -- see spi_reva1.c's WriteTXFIFO/ReadRXFIFO), so a 2- or 4-byte
+         * access here pops that many consecutive bytes, least-significant
+         * first, not just the low byte of one.
+         */
+        unsigned int i;
+
+        for (i = 0; i < size; i++) {
+            uint8_t byte = 0;
+
+            if (!fifo8_is_empty(&s->rx_fifo)) {
+                byte = fifo8_pop(&s->rx_fifo);
+            }
+            retvalue |= ((uint64_t)byte) << (8 * i);
         }
         /*
          * Popping may have freed the room that stalled max32650_spi_flush_tx()
          * (see its comment) -- resume shifting out whatever's still queued
          * in TX now that there's space for the responses again.
+         * max32650_spi_flush_tx() is a no-op unless s->running, so this is
+         * safe to call unconditionally.
          */
-        if ((s->ctrl0 & SPI_CTRL0_EN) && (s->ctrl0 & SPI_CTRL0_START)) {
-            max32650_spi_flush_tx(s);
-        }
+        max32650_spi_flush_tx(s);
         break;
+    }
     case SPI_CTRL0:
         retvalue = s->ctrl0;
         break;
@@ -159,44 +239,71 @@ static void max32650_spi_write(void *opaque, hwaddr addr,
     uint32_t value = val64;
 
     switch (addr) {
-    case SPI_FIFO:
-        if (fifo8_is_full(&s->tx_fifo)) {
-            s->intfl |= SPI_INT_TX_OV;
-        } else {
-            fifo8_push(&s->tx_fifo, value & 0xff);
+    case SPI_FIFO: {
+        /* See the matching comment in max32650_spi_read(). */
+        unsigned int i;
+
+        for (i = 0; i < size; i++) {
+            uint8_t byte = (value >> (8 * i)) & 0xff;
+
+            if (fifo8_is_full(&s->tx_fifo)) {
+                s->intfl |= SPI_INT_TX_OV;
+                break;
+            }
+            fifo8_push(&s->tx_fifo, byte);
         }
 
         /*
-         * If the engine is already enabled and started, new bytes are
-         * shifted out as soon as they are queued (see
-         * max32650_spi_flush_tx()).
+         * New bytes are shifted out as soon as they're queued, for as long
+         * as a transaction is still running -- max32650_spi_flush_tx() is
+         * a no-op otherwise, so this is safe to call unconditionally.
          */
-        if ((s->ctrl0 & SPI_CTRL0_EN) && (s->ctrl0 & SPI_CTRL0_START)) {
-            max32650_spi_flush_tx(s);
-        }
+        max32650_spi_flush_tx(s);
         max32650_spi_update_irq(s);
         return;
+    }
     case SPI_CTRL0: {
         uint32_t old = s->ctrl0;
 
         /*
-         * The real MAX32650 SPI driver (no-OS max32650/maxim_spi.c) asserts
-         * SS by setting START (with SS_CTRL cleared, i.e. cs_change mode --
-         * the only mode this workspace's SPI users configure) and
-         * deasserts it by clearing START once the transaction's declared
-         * byte count has been shifted -- so mirroring START's edges onto
-         * the cs line reproduces real per-transaction chip-select framing
-         * without needing to separately track CTRL1's byte count here.
+         * no-OS's own SPI driver (max32650/maxim_spi.c) asserts SS by
+         * setting START and deasserts it by clearing START once the
+         * transaction's declared byte count has been shifted, holding it
+         * high for the whole transfer.
+         *
+         * msdk's own official PeriphDriver (spi_reva1.c
+         * MXC_SPI_RevA1_MasterTransHandler, in hw_ss_control mode, the
+         * driver's default) does NOT hold START high, though: real
+         * hardware treats it as an edge-triggered "go" pulse that lets the
+         * engine autonomously keep running to completion, so that driver
+         * deliberately clears START again right after every refill call
+         * (see msdk issue analogdevicesinc/msdk#713) and relies on the
+         * hardware, not the bit's current level, to know a transfer is
+         * still in progress.
+         *
+         * s->running is this model's stand-in for that hardware-tracked
+         * "still in progress" state: latched true on START's rising edge,
+         * only cleared once CTRL1's declared character count has actually
+         * been shifted (see max32650_spi_flush_tx()) -- not by software
+         * clearing START early, which would otherwise stall a multi-burst
+         * transfer the moment a driver following msdk's real pattern
+         * clears it after the first refill. CS assert/deassert still
+         * follows START's edges directly (matching no-OS's driver, and
+         * harmless for msdk's since nothing on SPI0 during this project's
+         * testing cares about CS timing beyond the model's own SSI_CS_NONE
+         * loopback peripheral).
          */
         if (!(old & SPI_CTRL0_START) && (value & SPI_CTRL0_START)) {
             qemu_set_irq(s->cs, 0);
             s->intfl |= SPI_INT_SSA;
+            s->running = true;
+            s->bytes_done = 0;
+            /* Fresh transaction: the next byte is a character's low byte. */
+            s->char_byte_parity = 0;
         }
 
         s->ctrl0 = value;
-        if ((value & SPI_CTRL0_EN) && (value & SPI_CTRL0_START)) {
-            max32650_spi_flush_tx(s);
-        }
+        max32650_spi_flush_tx(s);
 
         if ((old & SPI_CTRL0_START) && !(value & SPI_CTRL0_START)) {
             qemu_set_irq(s->cs, 1);
@@ -221,9 +328,11 @@ static void max32650_spi_write(void *opaque, hwaddr addr,
     case SPI_DMA:
         if (value & SPI_DMA_TX_FLUSH) {
             fifo8_reset(&s->tx_fifo);
+            s->char_byte_parity = 0;
         }
         if (value & SPI_DMA_RX_FLUSH) {
             fifo8_reset(&s->rx_fifo);
+            s->char_byte_parity = 0;
         }
         /*
          * TX_FLUSH/RX_FLUSH are self-clearing pulses, and TX_LVL/RX_LVL
@@ -289,6 +398,9 @@ static const VMStateDescription max32650_spi_vmstate = {
         VMSTATE_UINT32(wken, Max32650SpiState),
         VMSTATE_FIFO8(tx_fifo, Max32650SpiState),
         VMSTATE_FIFO8(rx_fifo, Max32650SpiState),
+        VMSTATE_UINT8(char_byte_parity, Max32650SpiState),
+        VMSTATE_BOOL(running, Max32650SpiState),
+        VMSTATE_UINT32(bytes_done, Max32650SpiState),
         VMSTATE_END_OF_LIST()
     }
 };
